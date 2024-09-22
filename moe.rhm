@@ -7,6 +7,10 @@ type Exp
 | multE(l :: Exp, r :: Exp)
 | divE(l :: Exp, r :: Exp)
 | modE(l :: Exp, r :: Exp)
+| add1E(x :: Exp)
+| sub1E(x :: Exp)
+| minE(a :: Exp, b :: Exp)
+| maxE(a :: Exp, b :: Exp)
 
 fun interp(expr :: Exp) :: Int:
   match expr
@@ -16,6 +20,11 @@ fun interp(expr :: Exp) :: Int:
   | multE(l, r): interp(l) * interp(r)
   | divE(l, r): interp(l) / interp(r)
   | modE(l, r): interp(l) mod interp(r)
+  | add1E(a): interp(a) + 1
+  | sub1E(a): interp(a) - 1
+  | minE(a, b): min(interp(a), interp(b))
+  | maxE(a, b): max(interp(a), interp(b))
+
 
 fun parse(s :: Syntax) :: Exp:
   cond
@@ -29,6 +38,10 @@ fun parse(s :: Syntax) :: Exp:
       | '$left / $right': divE(parse(left), parse(right))
       | '$left % $right': modE(parse(left), parse(right))
       | '($inner)': parse(inner)
+      | 'add1($a)': add1E(parse(a))
+      | 'sub1($a)': sub1E(parse(a))
+      | 'min($a, $b)': minE(parse(a), parse(b))
+      | 'max($a, $b)': maxE(parse(a), parse(b))
       | ~else: error(#'parse, "bad syntax: " +& s)
 
 module test:
@@ -44,10 +57,21 @@ module test:
 
   check: interp(parse('(15 / 4) % 3'))
          ~is 0
-         
+
   check: interp(parse('15 / 4 % 3 - 10'))
          ~is 5
 
+  check: interp(parse('min(15, 10)'))
+         ~is 10
+
+  check: interp(parse('max(15, 10)'))
+         ~is 15
+
+  check: interp(parse('add1(41)'))
+         ~is 42
+
+  check: interp(parse('sub1(41)'))
+         ~is 40
 
   // Expression parser tests
   check: parse('1')
