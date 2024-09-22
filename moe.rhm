@@ -12,19 +12,38 @@ type Exp
 | minE(a :: Exp, b :: Exp)
 | maxE(a :: Exp, b :: Exp)
 
-fun interp(expr :: Exp) :: Int:
-  match expr
-  | intE(val): val
-  | plusE(l, r): interp(l) + interp(r)
-  | subE(l, r): interp(l) - interp(r)
-  | multE(l, r): interp(l) * interp(r)
-  | divE(l, r): interp(l) / interp(r)
-  | modE(l, r): interp(l) mod interp(r)
-  | add1E(a): interp(a) + 1
-  | sub1E(a): interp(a) - 1
-  | minE(a, b): min(interp(a), interp(b))
-  | maxE(a, b): max(interp(a), interp(b))
+type Value
+| intV(x :: Int)
+| boolV(x :: Boolean)
 
+fun interpInt(x :: Exp) :: Int:
+  match interp(x)
+  | intV(y): y
+  | ~else: error(#'interpInt, "invalid type for boolean operation")
+
+
+fun interpBoolean(x :: Exp) :: Boolean:
+  match interp(x)
+  | boolV(y): y
+  | ~else: error(#'interpBoolean, "invalid type for boolean operation")
+
+fun intOp2(a :: Exp, b :: Exp, f :: (Int, Int) -> Int) :: Value:
+  intV(f(interpInt(a), interpInt(b)))
+
+  
+
+fun interp(expr :: Exp) :: Value:
+  match expr
+  | intE(val): intV(val)
+  | plusE(l, r): intOp2(l, r, fun(x, y): x + y)
+  | subE(l, r): intOp2(l, r, fun(x, y): x - y)
+  | multE(l, r): intOp2(l, r, fun(x, y): x * y)
+  | divE(l, r): intOp2(l, r, fun(x, y): x / y)
+  | modE(l, r): intOp2(l, r, fun(x, y): x mod y)
+  | add1E(a): intV(interpInt(a) + 1)
+  | sub1E(a): intV(interpInt(a) - 1)
+  | minE(a, b): intOp2(a, b, fun(x, y): min(x, y))
+  | maxE(a, b): intOp2(a, b, fun(x, y): max(x, y))
 
 fun parse(s :: Syntax) :: Exp:
   cond
@@ -47,31 +66,31 @@ fun parse(s :: Syntax) :: Exp:
 module test:
   // Interpreter tests
   check: interp(intE(42))
-         ~is 42
+         ~is intV(42)
 
   check: interp(plusE(intE(9), intE(10)))
-         ~is 19
+         ~is intV(19)
 
   check: interp(plusE(multE(intE(4), intE(5)), intE(6)))
-         ~is 26
+         ~is intV(26)
 
   check: interp(parse('(15 / 4) % 3'))
-         ~is 0
+         ~is intV(0)
 
   check: interp(parse('15 / 4 % 3 - 10'))
-         ~is 5
+         ~is intV(5)
 
   check: interp(parse('min(15, 10)'))
-         ~is 10
+         ~is intV(10)
 
   check: interp(parse('max(15, 10)'))
-         ~is 15
+         ~is intV(15)
 
   check: interp(parse('add1(41)'))
-         ~is 42
+         ~is intV(42)
 
   check: interp(parse('sub1(41)'))
-         ~is 40
+         ~is intV(40)
 
   // Expression parser tests
   check: parse('1')
