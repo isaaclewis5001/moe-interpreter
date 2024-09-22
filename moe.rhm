@@ -2,6 +2,8 @@
 
 type Exp
 | intE(n :: Int)
+| boolE(b :: Boolean)
+| andE(l :: Exp, r :: Exp)
 | plusE(l :: Exp, r :: Exp)
 | subE(l :: Exp, r :: Exp)
 | multE(l :: Exp, r :: Exp)
@@ -11,6 +13,8 @@ type Exp
 | sub1E(x :: Exp)
 | minE(a :: Exp, b :: Exp)
 | maxE(a :: Exp, b :: Exp)
+| isEvenE(x :: Exp)
+| isOddE(x :: Exp)
 
 type Value
 | intV(x :: Int)
@@ -19,7 +23,7 @@ type Value
 fun interpInt(x :: Exp) :: Int:
   match interp(x)
   | intV(y): y
-  | ~else: error(#'interpInt, "invalid type for boolean operation")
+  | ~else: error(#'interpInt, "invalid type for integer operation")
 
 
 fun interpBoolean(x :: Exp) :: Boolean:
@@ -30,11 +34,14 @@ fun interpBoolean(x :: Exp) :: Boolean:
 fun intOp2(a :: Exp, b :: Exp, f :: (Int, Int) -> Int) :: Value:
   intV(f(interpInt(a), interpInt(b)))
 
-  
+fun boolOp2(a :: Exp, b :: Exp, f :: (Boolean, Boolean) -> Boolean) :: Value:
+  boolV(f(interpBoolean(a), interpBoolean(b)))
 
 fun interp(expr :: Exp) :: Value:
   match expr
   | intE(val): intV(val)
+  | boolE(val): boolV(val)
+  | andE(l, r): boolOp2(l, r, fun(x, y): x && y)
   | plusE(l, r): intOp2(l, r, fun(x, y): x + y)
   | subE(l, r): intOp2(l, r, fun(x, y): x - y)
   | multE(l, r): intOp2(l, r, fun(x, y): x * y)
@@ -44,13 +51,18 @@ fun interp(expr :: Exp) :: Value:
   | sub1E(a): intV(interpInt(a) - 1)
   | minE(a, b): intOp2(a, b, fun(x, y): min(x, y))
   | maxE(a, b): intOp2(a, b, fun(x, y): max(x, y))
+  | isEvenE(x): boolV(is_even(interpInt(x)))
+  | isOddE(x): boolV(is_odd(interpInt(x)))
 
 fun parse(s :: Syntax) :: Exp:
   cond
   | syntax_is_integer(s):
       intE(syntax_to_integer(s))
+  | syntax_is_boolean(s):
+      boolE(syntax_to_boolean(s))
   | ~else:
       match s
+      | '$left && $right': andE(parse(left), parse(right))
       | '$left + $right': plusE(parse(left), parse(right))
       | '$left - $right': subE(parse(left), parse(right))
       | '$left * $right': multE(parse(left), parse(right))
@@ -61,6 +73,8 @@ fun parse(s :: Syntax) :: Exp:
       | 'sub1($a)': sub1E(parse(a))
       | 'min($a, $b)': minE(parse(a), parse(b))
       | 'max($a, $b)': maxE(parse(a), parse(b))
+      | 'is_even($a)': isEvenE(parse(a))  
+      | 'is_odd($a)': isOddE(parse(a))
       | ~else: error(#'parse, "bad syntax: " +& s)
 
 module test:
@@ -92,6 +106,21 @@ module test:
   check: interp(parse('sub1(41)'))
          ~is intV(40)
 
+  check: interp(parse('is_even(7)'))
+         ~is boolV(#false)
+
+  check: interp(parse('is_odd(7)'))
+         ~is boolV(#true)
+
+  check: interp(parse('is_odd(#false)'))
+         ~raises "invalid type for integer operation"
+
+  check: interp(parse('#true && is_even(7)'))
+         ~is boolV(#false)
+
+  check: interp(parse('#false && 7'))
+         ~raises "invalid type for boolean operation"
+
   // Expression parser tests
   check: parse('1')
          ~is intE(1)
@@ -101,7 +130,7 @@ module test:
 
   check: parse('1 + 2 - 3')
          ~is plusE(intE(1), subE(intE(2), intE(3)))
-       
+
   check: parse('1 * 2')
          ~is multE(intE(1), intE(2))
 
@@ -113,6 +142,12 @@ module test:
 
   check: parse('1 * (2 + 3)')
          ~is multE(intE(1), plusE(intE(2), intE(3)))
+
+  check: parse('#true && #false')
+         ~is andE(boolE(#true), boolE(#false))
+
+  check: parse('#false && 7')
+         ~is andE(boolE(#false), intE(7))
 
   check: parse('1 + + 2')
          ~raises "bad syntax"
