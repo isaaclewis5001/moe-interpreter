@@ -3,13 +3,19 @@
 type Exp
 | intE(n :: Int)
 | plusE(l :: Exp, r :: Exp)
+| subE(l :: Exp, r :: Exp)
 | multE(l :: Exp, r :: Exp)
+| divE(l :: Exp, r :: Exp)
+| modE(l :: Exp, r :: Exp)
 
 fun interp(expr :: Exp) :: Int:
   match expr
   | intE(val): val
   | plusE(l, r): interp(l) + interp(r)
+  | subE(l, r): interp(l) - interp(r)
   | multE(l, r): interp(l) * interp(r)
+  | divE(l, r): interp(l) / interp(r)
+  | modE(l, r): interp(l) mod interp(r)
 
 fun parse(s :: Syntax) :: Exp:
   cond
@@ -18,7 +24,10 @@ fun parse(s :: Syntax) :: Exp:
   | ~else:
       match s
       | '$left + $right': plusE(parse(left), parse(right))
+      | '$left - $right': subE(parse(left), parse(right))
       | '$left * $right': multE(parse(left), parse(right))
+      | '$left / $right': divE(parse(left), parse(right))
+      | '$left % $right': modE(parse(left), parse(right))
       | '($inner)': parse(inner)
       | ~else: error(#'parse, "bad syntax: " +& s)
 
@@ -33,18 +42,31 @@ module test:
   check: interp(plusE(multE(intE(4), intE(5)), intE(6)))
          ~is 26
 
+  check: interp(parse('(15 / 4) % 3'))
+         ~is 0
+         
+  check: interp(parse('15 / 4 % 3 - 10'))
+         ~is 5
+
+
   // Expression parser tests
   check: parse('1')
          ~is intE(1)
 
   check: parse('1 + 2')
          ~is plusE(intE(1), intE(2))
+
+  check: parse('1 + 2 - 3')
+         ~is plusE(intE(1), subE(intE(2), intE(3)))
        
   check: parse('1 * 2')
          ~is multE(intE(1), intE(2))
 
-  check: parse('1 + 2 * 3 + 4')
-         ~is plusE(plusE(intE(1), multE(intE(2), intE(3))), intE(4))
+  check: parse('1 % 2 / 3')
+         ~is divE(modE(intE(1), intE(2)), intE(3))
+
+  check: parse('1 - 2 * 3 + 4')
+         ~is plusE(subE(intE(1), multE(intE(2), intE(3))), intE(4))
 
   check: parse('1 * (2 + 3)')
          ~is multE(intE(1), plusE(intE(2), intE(3)))
