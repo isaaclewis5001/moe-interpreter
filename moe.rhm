@@ -1,0 +1,143 @@
+#lang shplait
+
+type Exp
+| intE(n :: Int)
+| idE(s :: Symbol)
+| plusE(l :: Exp, r :: Exp)
+| multE(l :: Exp, r :: Exp)
+| appE(s :: Symbol, arg :: Exp)
+
+type FunDef
+| fd(name :: Symbol, arg :: Symbol, body :: Exp)
+
+fun get_fundef(s :: Symbol, funs :: Listof(FunDef)) :: FunDef:
+  match funs
+  | []: error(#'get_fundef, "function not found: " +& s)
+  | cons(x, xs):
+      if fd.name(x) == s
+      | x
+      | get_fundef(s, xs)
+
+
+fun subst(what :: Exp, for :: Symbol, in :: Exp):
+  match in:
+  | idE(x):
+      if x == for
+      | what
+      | in
+  | plusE(l, r): plusE(subst(what, for, l), subst(what, for, r))
+  | multE(l, r): multE(subst(what, for, l), subst(what, for, r))
+  | appE(s, arg): appE(s, subst(what, for, arg))
+  | ~else:
+      in
+
+fun interp(expr :: Exp, funs :: Listof(FunDef)) :: Int:
+  match expr
+  | intE(val): val
+  | plusE(l, r): interp(l, funs) + interp(r, funs)
+  | multE(l, r): interp(l, funs) * interp(r, funs)
+  | idE(name): error(#'interp, "undefined identifier: " +& name)
+  | appE(fname, exp):
+      def fundef = get_fundef(fname, funs)
+      interp(subst(intE(interp(exp, funs)), fd.arg(fundef), fd.body(fundef)), funs)
+
+fun parse(s :: Syntax) :: Exp:
+  cond
+  | syntax_is_integer(s):
+      intE(syntax_to_integer(s))
+  | syntax_is_symbol(s):
+      idE(syntax_to_symbol(s))
+  | ~else:
+      match s
+      | '$left + $right': plusE(parse(left), parse(right))
+      | '$left * $right': multE(parse(left), parse(right))
+      | '$sym($arg)': appE(syntax_to_symbol(sym),parse(arg))
+      | '($inner)': parse(inner)
+      | ~else: error(#'parse, "bad syntax: " +& s)
+
+fun parse_fundef(s :: Syntax):
+    match s:
+    | 'fun $fname($argname): $body':
+        fd(syntax_to_symbol(fname), syntax_to_symbol(argname), parse(body))
+
+
+
+module test:
+  
+  def double = parse_fundef('fun double(x): x + x')
+  def quadruple = parse_fundef('fun quadruple(x): double(double(x))')
+  def funs = [double, quadruple]
+  
+  // Interpreter tests
+  check: interp(intE(42), [])
+         ~is 42
+
+  check: interp(plusE(intE(9), intE(10)), [])
+         ~is 19
+
+  check: interp(plusE(multE(intE(4), intE(5)), intE(6)), [])
+         ~is 26
+
+  check: interp(parse('x'), [])
+         ~raises "undefined identifier"
+
+  check: interp(parse('quadruple(2)'), funs)
+         ~is 8
+
+  // Expression parser tests
+  check: parse('1')
+         ~is intE(1)
+
+  check: parse('1 + 2')
+         ~is plusE(intE(1), intE(2))
+       
+  check: parse('1 * 2')
+         ~is multE(intE(1), intE(2))
+
+  check: parse('1 + 2 * 3 + 4')
+         ~is plusE(plusE(intE(1), multE(intE(2), intE(3))), intE(4))
+
+  check: parse('1 * (2 + 3)')
+         ~is multE(intE(1), plusE(intE(2), intE(3)))
+
+  check: parse('x')
+         ~is idE(#'x)
+
+  check: parse('double(9)')
+         ~is appE(#'double, intE(9))
+
+  check: parse('1 + double(9)')
+         ~is plusE(intE(1), appE(#'double, intE(9)))
+
+  check: parse('1 + + 2')
+         ~raises "bad syntax"
+
+  // Function parser tests
+
+  check: parse_fundef('fun double(x): x + x')
+         ~is fd(#'double, #'x, plusE(idE(#'x), idE(#'x)))
+
+  // Function lookup tests
+
+  check: get_fundef(#'double, funs)
+         ~is double
+
+  check: get_fundef(#'quadruple, funs)
+         ~is quadruple
+
+  check: get_fundef(#'triple, funs)
+         ~raises "function not found"
+
+  // Substitution tests
+  check: subst(parse('8'), #'x, parse('9'))
+         ~is parse('9')
+  check: subst(parse('8'), #'x, parse('x'))
+         ~is parse('8')
+  check: subst(parse('8'), #'x, parse('y'))
+         ~is parse('y')
+  check: subst(parse('8'), #'x, parse('x + y'))
+         ~is parse('8 + y')
+  check: subst(parse('8'), #'x, parse('x * y'))
+         ~is parse('8 * y')
+  check: subst(parse('8'), #'x, parse('double(x)'))
+         ~is parse('double(8)')
