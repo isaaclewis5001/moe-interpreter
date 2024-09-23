@@ -110,8 +110,8 @@ module test:
   check: interp(plusE(multE(intE(4), intE(5)), intE(6)), mt_env, [])
          ~is 26
 
-  check: interp(parse('x + 4'), x, [])
-         ~is 5
+  check: interp(parse('x + 4'), [bind(#'x, 4)], [])
+         ~is 8
 
   check: interp(parse('x'), mt_env, [])
          ~raises "free variable"
