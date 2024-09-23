@@ -6,17 +6,39 @@ type Exp
 | plusE(l :: Exp, r :: Exp)
 | multE(l :: Exp, r :: Exp)
 | appE(s :: Symbol, arg :: Exp)
+| letE(s :: Symbol, rhs :: Exp, body :: Exp)
 
 type FunDef
 | fd(name :: Symbol, arg :: Symbol, body :: Exp)
 
+type Binding
+| bind(name :: Symbol, val :: Int)
+
+type Env = Listof(Binding)
+
+def mt_env = []
+def extend_env = cons
+
+
+fun find(l :: Listof(?A), f :: ?A -> Boolean) :: Optionof(?A):
+  fun find_inner(l :: Listof(?A)) :: Optionof(?A):
+    match l
+    | []: none()
+    | cons(x, xs):
+        if f(x):
+        | some(x)
+        | find_inner(xs)
+  find_inner(l)
+
+fun lookup(n :: Symbol, env :: Env):
+  match find(env, fun(x): bind.name(x) == n)
+  | some(x): x
+  | none(): error(#'lookup, "free variable: " +& n)
+
 fun get_fundef(s :: Symbol, funs :: Listof(FunDef)) :: FunDef:
-  match funs
-  | []: error(#'get_fundef, "function not found: " +& s)
-  | cons(x, xs):
-      if fd.name(x) == s
-      | x
-      | get_fundef(s, xs)
+  match find(funs, fun(x): fd.name(x) == s)
+  | some(x): x
+  | none(): error(#'get_fundef, "function not found: " +& s)
 
 
 fun subst(what :: Exp, for :: Symbol, in :: Exp):
@@ -31,15 +53,23 @@ fun subst(what :: Exp, for :: Symbol, in :: Exp):
   | ~else:
       in
 
-fun interp(expr :: Exp, funs :: Listof(FunDef)) :: Int:
-  match expr
-  | intE(val): val
-  | plusE(l, r): interp(l, funs) + interp(r, funs)
-  | multE(l, r): interp(l, funs) * interp(r, funs)
-  | idE(name): error(#'interp, "undefined identifier: " +& name)
-  | appE(fname, exp):
-      def fundef = get_fundef(fname, funs)
-      interp(subst(intE(interp(exp, funs)), fd.arg(fundef), fd.body(fundef)), funs)
+fun interp(expr :: Exp, env :: Env, funs :: Listof(FunDef)) :: Int:
+  fun interp_in1(expr :: Exp, env :: Env):
+    fun interp_in2(expr :: Exp):
+      match expr
+      | intE(val): val
+      | plusE(l, r): interp_in2(l) + interp_in2(r)
+      | multE(l, r): interp_in2(l) * interp_in2(r)
+      | idE(name): bind.val(lookup(name, env))
+      | appE(fname, aarg):
+          def fundef = get_fundef(fname, funs)
+          def farg = fd.arg(fundef)
+          def fbody = fd.body(fundef)
+          interp_in1(fbody, [bind(farg, interp_in2(aarg))])
+      | letE(sym, rhs, body):
+          interp_in1(body, extend_env(bind(sym, interp_in2(rhs)), env))
+    interp_in2(expr)
+  interp_in1(expr, env)
 
 fun parse(s :: Syntax) :: Exp:
   cond
@@ -49,6 +79,7 @@ fun parse(s :: Syntax) :: Exp:
       idE(syntax_to_symbol(s))
   | ~else:
       match s
+      | 'let $sym = $rhs: $body': letE(syntax_to_symbol(sym), parse(rhs), parse(body))
       | '$left + $right': plusE(parse(left), parse(right))
       | '$left * $right': multE(parse(left), parse(right))
       | '$sym($arg)': appE(syntax_to_symbol(sym),parse(arg))
@@ -63,26 +94,36 @@ fun parse_fundef(s :: Syntax):
 
 
 module test:
-  
+
+  def bad = parse_fundef('fun bad(x): y')
   def double = parse_fundef('fun double(x): x + x')
   def quadruple = parse_fundef('fun quadruple(x): double(double(x))')
-  def funs = [double, quadruple]
+  def funs = [double, quadruple, bad]
   
   // Interpreter tests
-  check: interp(intE(42), [])
+  check: interp(intE(42), mt_env, [])
          ~is 42
 
-  check: interp(plusE(intE(9), intE(10)), [])
+  check: interp(plusE(intE(9), intE(10)), mt_env, [])
          ~is 19
 
-  check: interp(plusE(multE(intE(4), intE(5)), intE(6)), [])
+  check: interp(plusE(multE(intE(4), intE(5)), intE(6)), mt_env, [])
          ~is 26
 
-  check: interp(parse('x'), [])
-         ~raises "undefined identifier"
+  check: interp(parse('x + 4'), x, [])
+         ~is 5
 
-  check: interp(parse('quadruple(2)'), funs)
+  check: interp(parse('x'), mt_env, [])
+         ~raises "free variable"
+
+  check: interp(parse('quadruple(2)'), mt_env, funs)
          ~is 8
+
+  check: interp(parse('let x = 5 : x + x'), mt_env, funs)
+         ~is 10
+
+  check: interp(parse('let x = 5 * quadruple(7) : let y = double(x) + x : x + y'), mt_env, funs)
+         ~is 560
 
   // Expression parser tests
   check: parse('1')
