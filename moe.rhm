@@ -78,7 +78,7 @@ fun parse(s :: Syntax) :: Exp:
                parse(body))
       | 'box($arg)': boxE(parse(arg))
       | 'unbox($arg)': unboxE(parse(arg))
-      | 'setbox($bx, $v)': setboxE(parse(bx), parse(v))
+      | 'set_box($bx, $v)': setboxE(parse(bx), parse(v))
       | 'begin: $fst; $sec': beginE(parse(fst), parse(sec))
       | '$fn($arg)':
           appE(parse(fn),
@@ -211,13 +211,13 @@ module test:
                 mt_env, mt_store)
          ~raises "free variable"
 
-  check: interp(parse('let b = box(10): begin: setbox(b, 15); unbox(b)'), mt_env, mt_store)
+  check: interp(parse('let b = box(10): begin: set_box(b, 15); unbox(b)'), mt_env, mt_store)
          ~is res(intV(15), [cell(1, intV(15)), cell(1, intV(10))])
 
-  check: interp(parse('let f = (fun(b): setbox(b, 15)): let b = box(10): begin: f(b); unbox(b)'), mt_env, mt_store)
+  check: interp(parse('let f = (fun(b): set_box(b, 15)): let b = box(10): begin: f(b); unbox(b)'), mt_env, mt_store)
          ~is res(intV(15), [cell(1, intV(15)), cell(1, intV(10))])
          
-  check: interp(parse('let a = box(10): let b = box(10): begin: setbox(a, 15); unbox(b)'), mt_env, mt_store)
+  check: interp(parse('let a = box(10): let b = box(10): begin: set_box(a, 15); unbox(b)'), mt_env, mt_store)
          ~is res(intV(10), [cell(1, intV(15)), cell(2, intV(10)), cell(1, intV(10))])
          
   check: interp(parse('unbox(0)'), mt_env, mt_store)
