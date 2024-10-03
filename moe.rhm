@@ -85,10 +85,10 @@ fun parse(s :: Syntax) :: Exp:
       | '$left * $right':
           multE(parse(left),
                 parse(right))
-      | '$rec . $field':
-          getE(parse(rec), syntax_to_symbol(field))
       | '$rec with ($field = $value)':
           setE(parse(rec), syntax_to_symbol(field), parse(value))
+      | '$rec . $field':
+          getE(parse(rec), syntax_to_symbol(field))
       | 'fun ($id): $body':
           funE(syntax_to_symbol(id),
                parse(body))
@@ -173,6 +173,8 @@ module test:
     ('let bad = (fun (x): x + y): let y = 5: bad(2)'): "free variable"
     ('(1).a'): "not a record"
     ('(fun(x): x) with (a = 1)'): "not a record"
+    ('{}.a'): "no such field"
+    ('{} with (a = 1)'): "no such field"
                
 // num_plus and num_mult ----------------------------------------
 fun num_op(op :: (Int, Int) -> Int, l :: Value, r :: Value) :: Value:
@@ -222,7 +224,7 @@ fun unwrap_record_value(v :: Value) :: Listof(Symbol) * Listof(Value):
 
 fun record_find(s :: Symbol, names :: Listof(Symbol), args :: Listof(Value)) :: Value:
   match names
-  | []: error(#'interp, "field not found")
+  | []: error(#'interp, "no such field")
   | cons(n, ns):
       match args
       | []: error(#'interp, "length mismatch")
@@ -233,7 +235,7 @@ fun record_find(s :: Symbol, names :: Listof(Symbol), args :: Listof(Value)) :: 
 
 fun record_update(s :: Symbol, new_val :: Value, names :: Listof(Symbol), args :: Listof(Value)) :: Listof(Value):
   match names
-  | []: error(#'interp, "field not found")
+  | []: error(#'interp, "no such field")
   | cons(n, ns):
       match args
       | []: error(#'interp, "length mismatch")
