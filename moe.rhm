@@ -74,10 +74,6 @@ fun parse(s :: Syntax) :: Exp:
           def args = map(syntax_to_symbol, syntax_to_list('[$arg, ...]'))
           def vals = map(parse, syntax_to_list('[$val, ...]'))
           recordE(args, vals)
-      | '$rec . $field':
-          getE(parse(rec), syntax_to_symbol(field))
-      | '$rec with ($field = $value)':
-          setE(parse(rec), syntax_to_symbol(field), parse(value))
       | 'let $name = $rhs:
            $body':
           letE(syntax_to_symbol(name),
@@ -89,6 +85,10 @@ fun parse(s :: Syntax) :: Exp:
       | '$left * $right':
           multE(parse(left),
                 parse(right))
+      | '$rec . $field':
+          getE(parse(rec), syntax_to_symbol(field))
+      | '$rec with ($field = $value)':
+          setE(parse(rec), syntax_to_symbol(field), parse(value))
       | 'fun ($id): $body':
           funE(syntax_to_symbol(id),
                parse(body))
@@ -138,7 +138,14 @@ fun interp(a :: Exp, env :: Env) :: Value:
                  extend_env(bind(n, interp(arg, env)),
                             c_env))
       | ~else: error(#'interp, "not a function")
-  | ~else: error(#'interp, "not implemented")
+  | recordE(names, args):
+      recV(names, map(fun(x): interp(x, env), args))
+  | getE(rec_exp, field_name):
+      def values(names, vals) = unwrap_record_value(interp(rec_exp, env))
+      record_find(field_name, names, vals)
+  | setE(rec_exp, field_name, val_exp):
+      def values(names, vals) = unwrap_record_value(interp(rec_exp, env))
+      recV(names, record_update(field_name, interp(val_exp, env), names, vals))
 
 module test:
   fun interp_syn(s :: Syntax) :: Value:
@@ -154,12 +161,18 @@ module test:
     ('let x = 5: let x = x + 1: x + x'): intV(12)
     ('let x = 5: let y = 6: x'): intV(5)
     ('(fun (x): x + x)(8)'): intV(16)
+    ('{a: 1, b: 2, c: 3}'): recV([#'a, #'b, #'c], [intV(1), intV(2), intV(3)])
+    ('let x = {a: 1, b: 2, c: 3}: x with (b = 4)'): recV([#'a, #'b, #'c], [intV(1), intV(4), intV(3)])
+    ('let make_quadratic = (fun (q): fun(x): q.a * x * x + q.b * x + q.c):
+        make_quadratic({a: 2, b: -1, c: 1})(2)'): intV(7)
 
   test_errors interp_syn:
     ('x'): "free variable"
     ('1(2)'): "not a function"
     ('1 + (fun (x): x)'): "not a number"
     ('let bad = (fun (x): x + y): let y = 5: bad(2)'): "free variable"
+    ('(1).a'): "not a record"
+    ('(fun(x): x) with (a = 1)'): "not a record"
                
 // num_plus and num_mult ----------------------------------------
 fun num_op(op :: (Int, Int) -> Int, l :: Value, r :: Value) :: Value:
@@ -199,3 +212,38 @@ module test:
 
   test_errors lookup:
     (#'x, mt_env): "free variable"
+
+    
+// record helpers --------------------------------
+fun unwrap_record_value(v :: Value) :: Listof(Symbol) * Listof(Value):
+  match v
+  | recV(names, vals): values(names, vals)
+  | ~else: error(#'interp, "not a record")
+
+fun record_find(s :: Symbol, names :: Listof(Symbol), args :: Listof(Value)) :: Value:
+  match names
+  | []: error(#'interp, "field not found")
+  | cons(n, ns):
+      match args
+      | []: error(#'interp, "length mismatch")
+      | cons(arg_first, args_rest): 
+          if n == s
+          | arg_first
+          | record_find(s, ns, args_rest)
+
+fun record_update(s :: Symbol, new_val :: Value, names :: Listof(Symbol), args :: Listof(Value)) :: Listof(Value):
+  match names
+  | []: error(#'interp, "field not found")
+  | cons(n, ns):
+      match args
+      | []: error(#'interp, "length mismatch")
+      | cons(arg_first, args_rest): 
+          if n == s
+          | cons(new_val, args_rest)
+          | cons(arg_first, record_update(s, new_val, ns, args_rest))
+
+module test:
+  test_errors record_find:
+    (#'x, [#'x], []): "length mismatch"
+  test_errors record_update:
+    (#'x, intV(1), [#'x], []): "length mismatch"
