@@ -27,6 +27,8 @@ type Value
 | closV(arg :: Symbol,
         body :: Exp,
         env :: Env)
+| recV(ns :: Listof(Symbol),
+       vs :: Listof(Value))
 
 type Exp
 | intE(n :: Int)
@@ -42,6 +44,13 @@ type Exp
        body :: Exp)
 | appE(fn :: Exp,
        arg :: Exp)
+| recordE(ns :: Listof(Symbol),
+          args :: Listof(Exp))
+| getE(rec :: Exp,
+       n :: Symbol)
+| setE(rec :: Exp,
+       n :: Symbol,
+       val :: Exp)
 
 type Binding
 | bind(name :: Symbol,
@@ -61,6 +70,14 @@ fun parse(s :: Syntax) :: Exp:
       idE(syntax_to_symbol(s))
   | ~else:
       match s
+      | '{$arg: $val, ...}':
+          def args = map(syntax_to_symbol, syntax_to_list('[$arg, ...]'))
+          def vals = map(parse, syntax_to_list('[$val, ...]'))
+          recordE(args, vals)
+      | '$rec . $field':
+          getE(parse(rec), syntax_to_symbol(field))
+      | '$rec with ($field = $value)':
+          setE(parse(rec), syntax_to_symbol(field), parse(value))
       | 'let $name = $rhs:
            $body':
           letE(syntax_to_symbol(name),
@@ -95,6 +112,9 @@ module test:
     ('1 + double(9)'): plusE(intE(1), appE(idE(#'double), intE(9)))
     ('3 * (4 + 8)'): multE(intE(3), plusE(intE(4), intE(8)))
     ('let x = 1 + 2: y'): letE(#'x, plusE(intE(1), intE(2)), idE(#'y))
+    ('{a: 1, b: 2, c: 3}'): recordE([#'a, #'b, #'c], [intE(1), intE(2), intE(3)])
+    ('x with (a = 4)'): setE(idE(#'x), #'a, intE(4))
+    ('x.a'): getE(idE(#'x), #'a)
   test_errors parse:
     ('1 2'): "invalid input"
       
@@ -118,6 +138,7 @@ fun interp(a :: Exp, env :: Env) :: Value:
                  extend_env(bind(n, interp(arg, env)),
                             c_env))
       | ~else: error(#'interp, "not a function")
+  | ~else: error(#'interp, "not implemented")
 
 module test:
   fun interp_syn(s :: Syntax) :: Value:
