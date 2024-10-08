@@ -26,7 +26,7 @@ type Value
 | intV(n :: Int)
 | closV(arg :: Symbol,
         body :: Exp,
-        env :: Env)
+        env :: Env(Value))
 
 type Exp
 | intE(n :: Int)
@@ -35,24 +35,33 @@ type Exp
         r :: Exp)
 | multE(l :: Exp,
         r :: Exp)
-| letE(n :: Symbol,
-       rhs :: Exp,
-       body :: Exp)
 | funE(n :: Symbol,
+       arg_type :: Type,
        body :: Exp)
 | appE(fn :: Exp,
        arg :: Exp)
 
-type Binding
-| bind(name :: Symbol,
-       val :: Value)
+type Type
+| intT()
+| boolT()
+| arrowT(arg :: Type,
+         result :: Type)
 
-type Env = Listof(Binding)
+type Binding(?A)
+| bind(name :: Symbol,
+       val :: ?A)
+
+type Env(?A) = Listof(Binding(?A))
+
+
 
 def mt_env = []
 def extend_env = cons
 
 // parse ----------------------------------------
+fun parse_error(s :: Syntax):
+  error(#'parse, "invalid input: " +& s)
+
 fun parse(s :: Syntax) :: Exp:
   cond
   | syntax_is_integer(s):
@@ -61,27 +70,26 @@ fun parse(s :: Syntax) :: Exp:
       idE(syntax_to_symbol(s))
   | ~else:
       match s
-      | 'let $name = $rhs:
+      | 'let $name :: $ty = $rhs:
            $body':
-          letE(syntax_to_symbol(name),
-               parse(rhs),
-               parse(body))
+            appE(funE(syntax_to_symbol(name), parse_type(ty), parse(body)), parse(rhs))
       | '$left + $right':
           plusE(parse(left),
                 parse(right))
       | '$left * $right':
           multE(parse(left),
                 parse(right))
-      | 'fun ($id): $body':
+      | 'fun ($id :: $ty): $body':
           funE(syntax_to_symbol(id),
+               parse_type(ty),
                parse(body))
       | '$fn($arg)':
-          appE(parse(fn),
-               parse(arg))
+          appE(parse(fn), parse(arg))
       | '($e)':
           parse(e)
       | ~else:
-          error(#'parse, "invalid input: " +& s)
+          parse_error(s)
+
 
 module test:
   test_returns parse:
@@ -90,27 +98,76 @@ module test:
     ('2 + 1'): plusE(intE(2), intE(1))
     ('3 * 4'): multE(intE(3), intE(4))
     ('3 * 4 + 8'): plusE(multE(intE(3), intE(4)), intE(8))
-    ('fun (x): 9'): funE(#'x, intE(9))
+    ('fun (x :: Int): 9'): funE(#'x, intT(), intE(9))
+    ('let x :: Int = 10: x'): appE(funE(#'x, intT(), idE(#'x)), intE(10))
     ('double(9)'): appE(idE(#'double), intE(9))
     ('1 + double(9)'): plusE(intE(1), appE(idE(#'double), intE(9)))
     ('3 * (4 + 8)'): multE(intE(3), plusE(intE(4), intE(8)))
-    ('let x = 1 + 2: y'): letE(#'x, plusE(intE(1), intE(2)), idE(#'y))
   test_errors parse:
     ('1 2'): "invalid input"
-      
+    ('let x :: Covfefe = 10: x'): "invalid input"
+
+
+    
+// parse_type ------------------------------------
+
+fun parse_type(s :: Syntax) :: Type:
+  match s
+  | 'Boolean': boolT()
+  | 'Int': intT()
+  | '$x -> $y': arrowT(parse_type(x), parse_type(y))
+  | '($t)': parse_type(t)
+  | ~else: parse_error(s)
+
+// typecheck -------------------------------------
+
+fun type_error(e :: Exp, expected :: String):
+  error(#'typecheck, "no type/incorrect type: expected " +& expected +& " at " +& e)
+
+fun tc_int(e :: Exp, env :: Env(Type)):
+  match typecheck(e, env)
+  | intT(): #void
+  | ~else: type_error(e, "Int")
+
+fun typecheck(e :: Exp, env :: Env(Type)) :: Type:
+  match e
+  | idE(s):
+      lookup(s, env)
+  | intE(x):
+      intT()
+  | plusE(l, r):
+      tc_int(l, env)
+      tc_int(r, env)
+      intT()
+  | multE(l, r):
+      tc_int(l, env)
+      tc_int(r, env)
+      intT()
+  | funE(n, arg_type, body):
+      arrowT(
+        arg_type,
+        typecheck(
+          body,
+          extend_env(bind(n, arg_type), env)  
+        )
+      )
+  | appE(fn, arg):
+      match typecheck(fn, env):
+      | arrowT(x_type, y_type):
+          if x_type == typecheck(arg, env)
+          | y_type
+          | type_error(arg, to_string(x_type))
+      | ~else: type_error(fn, "function") 
+
+
 // interp ----------------------------------------
-fun interp(a :: Exp, env :: Env) :: Value:
+fun interp(a :: Exp, env :: Env(Value)) :: Value:
   match a
   | intE(n): intV(n)
   | idE(s): lookup(s, env)
   | plusE(l, r): num_plus(interp(l, env), interp(r, env))
   | multE(l, r): num_mult(interp(l, env), interp(r, env))
-  | letE(n, rhs, body):
-      def rhs_v = interp(rhs, env)
-      interp(body,
-             extend_env(bind(n, rhs_v),
-                        env))
-  | funE(n, body): closV(n, body, env)
+  | funE(n, arg_type, body): closV(n, body, env)
   | appE(fn, arg):
       match interp(fn, env)
       | closV(n, body, c_env):
@@ -120,25 +177,38 @@ fun interp(a :: Exp, env :: Env) :: Value:
       | ~else: error(#'interp, "not a function")
 
 module test:
-  fun interp_syn(s :: Syntax) :: Value:
-    interp(parse(s), mt_env)
+  fun interp_syn_tc(s :: Syntax) :: Value * Type:
+    def e = parse(s)
+    def ty = typecheck(e, mt_env)
+    values(interp(e, mt_env), ty)
 
-  test_returns interp_syn:
-    ('2'): intV(2)
-    ('2 + 1'): intV(3)
-    ('2 * 1'): intV(2)
-    ('(2 * 3) + (5 + 8)'): intV(19)
-    ('fun (x): x + x'): closV(#'x, plusE(idE(#'x), idE(#'x)), mt_env)
-    ('let x = 5: x + x'): intV(10)
-    ('let x = 5: let x = x + 1: x + x'): intV(12)
-    ('let x = 5: let y = 6: x'): intV(5)
-    ('(fun (x): x + x)(8)'): intV(16)
+  fun interp_syn(s :: Syntax) :: Value:
+    def e = parse(s)
+    interp(e, mt_env)
+
+  test_returns interp_syn_tc:
+    ('2'): values(intV(2), intT())
+    ('2 + 1'): values(intV(3), intT())
+    ('2 * 1'): values(intV(2), intT())
+    ('(2 * 3) + (5 + 8)'): values(intV(19), intT())
+    ('fun (x :: Int): x + x'): values(closV(#'x, plusE(idE(#'x), idE(#'x)), mt_env), arrowT(intT(), intT()))
+    ('let x :: Int = 5: x + x'): values(intV(10), intT())
+    ('let x :: Int = 5: let x :: Int = x + 1: x + x'): values(intV(12), intT())
+    ('let x :: Int = 5: let y :: Int = 6: x'): values(intV(5), intT())
+    ('(fun (x :: Int): x + x)(8)'): values(intV(16), intT())
+
+  test_errors interp_syn_tc:
+    ('x'): "free variable"
+    ('1(2)'): "no type"
+    ('1 + (fun (x :: Int): x)'): "no type"
+    ('let x :: Boolean = 5: x'): "no type"
+    ('let x :: (Int -> Int) = (fun(y :: Int): y): x(x)'): "no type"
+    ('let bad :: Int -> Int = (fun (x :: Int): x + y): let y :: Int = 5: bad(2)'): "free variable"
 
   test_errors interp_syn:
-    ('x'): "free variable"
     ('1(2)'): "not a function"
-    ('1 + (fun (x): x)'): "not a number"
-    ('let bad = (fun (x): x + y): let y = 5: bad(2)'): "free variable"
+    ('1 + (fun (x :: Int): x)'): "not a number"
+    
                
 // num_plus and num_mult ----------------------------------------
 fun num_op(op :: (Int, Int) -> Int, l :: Value, r :: Value) :: Value:
@@ -160,7 +230,7 @@ module test:
     (intV(3), intV(2)): intV(6)
   
 // lookup ----------------------------------------
-fun lookup(n :: Symbol, env :: Env) :: Value:
+fun lookup(n :: Symbol, env :: Env(?A)) :: ?A:
   match env
   | []: error(#'lookup, "free variable")
   | cons(b, rst_env):
