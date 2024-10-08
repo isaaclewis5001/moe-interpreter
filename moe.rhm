@@ -23,10 +23,13 @@ macro '
   '
 
 macro 'reslet ($v_id, $sto_id) = $call:
-         $body':
+         $body
+         ...':
   'match $call
    | res($v_id, $sto_id):
-       $body'
+       block:
+         $body
+         ...'
 
 type Value
 | intV(n :: Int)
@@ -51,10 +54,12 @@ type Exp
        arg :: Exp)
 | beginE(l :: Exp,
          r :: Exp)
+| setE(s :: Symbol, v :: Exp)
+| swapE(fs :: Symbol, ss :: Symbol)
 
 type Binding
 | bind(name :: Symbol,
-       val :: Value)
+       loc :: Location)
 
 type Env = Listof(Binding)
 
@@ -89,6 +94,10 @@ fun parse(s :: Syntax) :: Exp:
           letE(syntax_to_symbol(name),
                parse(rhs),
                parse(body))
+      | '$var := $val':
+          setE(syntax_to_symbol(var), parse(val))
+      | '$v1 <> $v2':
+          swapE(syntax_to_symbol(v1), syntax_to_symbol(v2))
       | '$left + $right':
           plusE(parse(left),
                 parse(right))
@@ -132,7 +141,7 @@ module test:
 fun interp(a :: Exp, env :: Env, sto :: Store) :: Result:
   match a
   | intE(n): res(intV(n), sto)
-  | idE(s): res(lookup(s, env), sto)
+  | idE(s): res(fetch(lookup(s, env), sto), sto)
   | plusE(l, r): reslet (v_l, sto_l) = interp(l, env, sto):
                    reslet (v_r, sto_r) = interp(r, env, sto_l):
                      res(num_plus(v_l, v_r), sto_r)
@@ -141,24 +150,50 @@ fun interp(a :: Exp, env :: Env, sto :: Store) :: Result:
                      res(num_mult(v_l, v_r), sto_r)
   | letE(n, rhs, body):
       reslet (v_rhs, sto_rhs) = interp(rhs, env, sto):
-        interp(body,
-               extend_env(bind(n, v_rhs),
-                          env),
-               sto_rhs)
+          def loc = new_loc(sto)
+          interp(
+            body, 
+            extend_env(bind(n, loc), env),
+            override_store(cell(loc, v_rhs), sto_rhs)
+          )
   | funE(n, body): res(closV(n, body, env), sto)
   | appE(fn, arg):
       reslet (v_fn, sto_fn) = interp(fn, env, sto):
         match v_fn
         | closV(n, body, c_env):
             reslet (v_arg, sto_arg) = interp(arg, env, sto_fn):
-              interp(body,
-                     extend_env(bind(n, v_arg),
-                                c_env),
-                     sto_arg)
+              def loc = new_loc(sto)
+              interp(
+                body,
+                extend_env(bind(n, loc), c_env),
+                override_store(cell(loc, v_arg), sto_arg)
+              )
         | ~else: error(#'interp, "not a function")
   | beginE(l, r):
       reslet (v_l, sto_l) = interp(l, env, sto):
         interp(r, env, sto_l)
+  | setE(n, rhs):
+      reslet (v_rhs, sto_rhs) = interp(rhs, env, sto):
+          def loc: lookup(n, env)
+          res(v_rhs, override_store(cell(loc, v_rhs), sto_rhs))
+  | swapE(s1, s2):
+      def loc1 = lookup(s1, env)
+      def loc2 = lookup(s2, env)
+      
+      def v1 = fetch(loc1, sto)
+      def v2 = fetch(loc2, sto)
+      
+      res(
+        v2, 
+        override_store(
+          cell(loc1, v2),
+          override_store(
+            cell(loc2, v1),
+            sto
+          )
+        )
+      )
+  
 
 
 module test:
@@ -201,21 +236,21 @@ module test:
     (intV(3), intV(2)): intV(6)
   
 // lookup ----------------------------------------
-fun lookup(n :: Symbol, env :: Env) :: Value:
+fun lookup(n :: Symbol, env :: Env) :: Location:
   match env
   | []: error(#'lookup, "free variable: " +& n)
   | cons(b, rst_env):
       cond
       | n == bind.name(b):
-          bind.val(b)
+          bind.loc(b)
       | ~else:
           lookup(n, rst_env)
 
 module test:
   test_returns lookup:
-    (#'x, extend_env(bind(#'x, intV(8)), mt_env)): intV(8)
-    (#'x, extend_env(bind(#'x, intV(9)), extend_env(bind(#'x, intV(8)), mt_env))): intV(9)
-    (#'y, extend_env(bind(#'x, intV(9)), extend_env(bind(#'y, intV(8)), mt_env))): intV(8)
+    (#'x, extend_env(bind(#'x, 8), mt_env)): 8
+    (#'x, extend_env(bind(#'x, 9), extend_env(bind(#'x, 8), mt_env))): 9
+    (#'y, extend_env(bind(#'x, 9), extend_env(bind(#'y, 8), mt_env))): 8
 
   test_errors lookup:
     (#'x, mt_env): "free variable"
