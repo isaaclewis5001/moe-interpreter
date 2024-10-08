@@ -110,6 +110,8 @@ fun parse(s :: Syntax) :: Exp:
       | ~else:
           error(#'parse, "invalid input: " +& s)
 
+module test:
+
   test_returns parse:
     ('2'): intE(2)
     ('x'): idE(#'x)
@@ -158,8 +160,10 @@ fun interp(a :: Exp, env :: Env, sto :: Store) :: Result:
       reslet (v_l, sto_l) = interp(l, env, sto):
         interp(r, env, sto_l)
 
+
+module test:
   fun interp_syn(s :: Syntax) :: Value:
-    interp(parse(s), mt_env)
+    res.v(interp(parse(s), mt_env, mt_store))
 
   test_returns interp_syn:
     ('2'): intV(2)
@@ -191,7 +195,6 @@ fun num_mult(l :: Value, r :: Value) :: Value:
   num_op(fun (a, b): a*b, l, r)
 
 module test:
-
   test_returns num_plus:
     (intV(1), intV(2)): intV(3)
   test_returns num_mult:
@@ -208,6 +211,7 @@ fun lookup(n :: Symbol, env :: Env) :: Value:
       | ~else:
           lookup(n, rst_env)
 
+module test:
   test_returns lookup:
     (#'x, extend_env(bind(#'x, intV(8)), mt_env)): intV(8)
     (#'x, extend_env(bind(#'x, intV(9)), extend_env(bind(#'x, intV(8)), mt_env))): intV(9)
