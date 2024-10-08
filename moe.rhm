@@ -210,7 +210,12 @@ module test:
     ('let x = 5: let x = x + 1: x + x'): intV(12)
     ('let x = 5: let y = 6: x'): intV(5)
     ('(fun (x): x + x)(8)'): intV(16)
-
+    ('let x = 5: let y = 6: x <> y'): intV(6)
+    ('let x = 5: let y = 6: begin: x <> y; y'): intV(5)
+    ('let x = 5: x := 6'): intV(6)
+    ('let x = 5: let y = (fun(a): x): begin: x := 6; y(0)'): intV(6)
+    ('let x = 14: let y = (fun(a): x := 17): begin: y(0); x'): intV(17)
+    ('let x = 14: let y = (fun(a): a := 17): begin: y(x); x'): intV(14)
   test_errors interp_syn:
     ('x'): "free variable"
     ('1(2)'): "not a function"
