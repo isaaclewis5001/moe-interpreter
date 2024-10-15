@@ -216,12 +216,14 @@ fun interp(a :: Exp, env :: Env) :: Value:
   | multE(l, r): num_mult(interp(l, env), interp(r, env))
   | funE(n, arg_type, body): closV(n, body, env)
   | appE(fn, arg):
+      def argV = interp(arg, env)
       match interp(fn, env)
       | closV(n, body, c_env):
           interp(body,
-                 extend_env(bind(n, box(some(interp(arg, env)))),
+                 extend_env(bind(n, box(some(argV))),
                             c_env))
-      | constructorV(tag): ....
+      | constructorV(tag):
+          variantV(tag, argV)
       | ~else: error(#'interp, "not a function")
   | if0E(c, t, e): 
       match interp(c, env)
@@ -229,16 +231,36 @@ fun interp(a :: Exp, env :: Env) :: Value:
           if n == 0 | interp(t, env) | interp(e, env)
       | ~else: error(#'interp, "not a number")
   | letrecE(n, n_type, rhs, body):
-      ....
+      def rbox = box(none())
+      def new_env = cons(bind(n, rbox), env)
+      set_box(rbox, some(interp(rhs, new_env)))
+      interp(body, new_env)
   | let_typeE(type_name,
               tag1, type1,
               tag2, type2,
               body):
-      ....
+      def c1 = box(some(constructorV(tag1)))
+      def c2 = box(some(constructorV(tag2)))
+      def new_env = cons(bind(tag1, c1), cons(bind(tag2, c2), env))
+      interp(body, new_env)
   | matchE(tst, ty,
            tag1, n1, rhs1,
            tag2, n2, rhs2):
-      ....
+      match interp(tst, env)
+      | variantV(tag, value):
+          cond
+          | tag == tag1:
+              interp(
+                rhs1, 
+                cons(bind(n1, box(some(value))), env)
+              )
+          | tag == tag2:
+              interp(
+                rhs2, 
+                cons(bind(n2, box(some(value))), env)
+              )
+          | ~else: error(#'interp, "wrong tag")
+      | ~else: error(#'interp, "not a variant")
 
 module test:
   check: interp(parse('2'), mt_env)
@@ -397,6 +419,7 @@ fun typecheck(a :: Exp, tenv :: TypeEnv) :: Type:
   | plusE(l, r): typecheck_nums(l, r, tenv)
   | multE(l, r): typecheck_nums(l, r, tenv)
   | funE(n, arg_type, body):
+      tvarcheck(arg_type, tenv)
       arrowT(arg_type,
              typecheck(body,
                        extend_env(tbind(n, arg_type),
@@ -417,16 +440,58 @@ fun typecheck(a :: Exp, tenv :: TypeEnv) :: Type:
           | type_error(else, to_string(then_tp))
       | ~else: type_error(check_e, to_string(a))
   | letrecE(n, n_type, rhs, body):
-      ....
+      tvarcheck(n_type, tenv)
+      def new_tenv = cons(tbind(n, n_type), tenv)
+      if typecheck(rhs, new_tenv) == n_type
+      | typecheck(body, new_tenv)
+      | type_error(rhs, n_type)
   | let_typeE(type_name,
               tag1, type1,
               tag2, type2,
               body):
-      ....
+      def new_type = definedT(type_name)
+      def new_tenv = cons(
+        tbind(tag1, arrowT(type1, new_type)),
+        cons(
+          tbind(tag2, arrowT(type2, new_type)),
+          cons(
+            tdef(
+              type_name,
+              tag1,
+              type1,
+              tag2,
+              type2
+            ),
+            tenv
+          )
+        )
+      )
+      tvarcheck(type1, new_tenv)
+      tvarcheck(type2, new_tenv)
+      def rt = typecheck(body, new_tenv)
+      if contains_type(new_type, rt)
+      | error(#'typecheck, rt +& " not type without " +& new_type)
+      | rt
   | matchE(tst, type_name,
            tag1, n1, rhs1,
            tag2, n2, rhs2):
-      ....
+      def test_type: defined_type_lookup(type_name, tenv)
+      if tdef.tag1(test_type) != tag1 || tdef.tag2(test_type) != tag2
+      | type_error(a, "matching variant names")
+      | #void
+
+      match typecheck(tst, tenv)
+      | definedT(actual_tname):
+          if actual_tname != type_name
+          | type_error(tst, type_name)
+          | #void
+          def b1 = typecheck(rhs1, cons(tbind(n1, tdef.type1(test_type)), tenv))
+          def b2 = typecheck(rhs2, cons(tbind(n2, tdef.type2(test_type)), tenv))
+          if b1 == b2
+          | b1
+          | type_error(rhs2, b1) 
+      | ~else: type_error(tst, type_name)
+      
 
 fun typecheck_nums(l, r, tenv):
   match typecheck(l, tenv)
